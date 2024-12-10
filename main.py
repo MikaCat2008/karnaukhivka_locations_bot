@@ -24,7 +24,6 @@ class ShortLocation:
     id: int
     name: str
     rating: float
-    comments: int
 
 
 @dataclass
@@ -35,7 +34,6 @@ class FullLocation:
     media: list[str]
     likes: int
     rating: float
-    comments: int
     dislikes: int
 
 
@@ -45,24 +43,196 @@ class OfferLocationForm(StatesGroup):
     location_media = State()
 
 
-class Bot_MenuSystem(AsyncSystem):
-    async def on_start(self, message: Message) -> None:
-        keyboard = [
-            [ 
-                KeyboardButton(text="Локації"), 
-                KeyboardButton(text="Детальніше") 
-            ],
-            [ 
-                KeyboardButton(text="Запропонувати локацію") 
-            ]
-        ]
+class DatabaseSystem(AsyncSystem):
+    connection: Connection
 
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.connection = connect("database.db", isolation_level=None)
+
+    def calc_rating(self, likes: int, dislikes: int) -> float:
+        if likes + dislikes == 0:
+            return 5
+        
+        return round(5 * likes / (likes + dislikes), 1)
+            
+    async def create_tables(self) -> None:
+        await self.connection.executescript(
+            """
+                CREATE TABLE IF NOT EXISTS media (
+                    location_id INTEGER,
+                    file_id STRING
+                );
+                CREATE TABLE IF NOT EXISTS ratings (
+                    location_id INTEGER,
+                    status BOOLEAN,
+                    user_id INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS locations (
+                    id INTEGER PRIMARY KEY,
+                    name STRING,
+                    info STRING,
+                    likes INTEGER,
+                    dislikes INTEGER
+                )
+            """
+        )
+
+    async def get_rating(self, user_id: int, location_id: int) -> object:
+        async with await self.connection.execute(
+            "SELECT * FROM ratings WHERE user_id=? AND location_id=?",
+            ( user_id, location_id )
+        ) as cursor:
+            return await cursor.fetchone()
+
+    async def like(self, user_id: int, location_id: int) -> Optional[FullLocation]:        
+        if await self.get_rating(user_id, location_id):
+            return
+        
+        await self.connection.execute(
+            "UPDATE locations SET likes=likes + 1 WHERE id=?",
+            ( location_id, )
+        )
+        await self.connection.execute(
+            "INSERT INTO ratings(location_id, status, user_id) "
+            "VALUES(?, TRUE, ?)",
+            ( location_id, user_id )
+        )
+        
+        return await self.get_location(location_id)
+
+    async def dislike(self, user_id: int, location_id: int) -> Optional[FullLocation]:
+        if await self.get_rating(user_id, location_id):
+            return
+            
+        await self.connection.execute(
+            "UPDATE locations SET dislikes=dislikes + 1 WHERE id=?",
+            ( location_id, )
+        )
+        await self.connection.execute(
+            "INSERT INTO ratings(location_id, status, user_id) "
+            "VALUES(?, FALSE, ?)",
+            ( location_id, user_id )
+        )
+
+        return await self.get_location(location_id)
+
+    async def create_location(self, name: str, info: str, media: list[str]) -> FullLocation:
+        async with await self.connection.execute(
+            "INSERT INTO locations(id, name, info, likes, dislikes) "
+            f"VALUES(NULL, ?, ?, ?, ?)",
+            ( name, info, 0, 0 )
+        ) as cursor:
+            location_id = cursor.lastrowid
+
+        await self.connection.execute(
+            "INSERT INTO media(location_id, file_id) "
+            f"VALUES {', '.join([f'({location_id}, ?)'] * len(media))}",
+            media
+        )
+
+        return FullLocation(
+            id=location_id,
+            name=name,
+            info=info,
+            likes=0,
+            media=media,
+            rating=5,
+            dislikes=0
+        )
+
+    async def get_location(self, location_id: int) -> FullLocation:
+        async with await self.connection.execute(
+            "SELECT file_id FROM media WHERE location_id=?",
+            ( location_id, )
+        ) as cursor:
+            rows = await cursor.fetchall()
+            media = list(map(lambda f: f[0], rows))
+
+        async with await self.connection.execute(
+            "SELECT * FROM locations WHERE id=?",
+            ( location_id, )
+        ) as cursor:
+            location_id, name, info, likes, dislikes = await cursor.fetchone()
+
+        return FullLocation(
+            id=location_id,
+            name=name,
+            info=info,
+            media=media,
+            likes=likes,
+            rating=self.calc_rating(likes, dislikes),
+            dislikes=dislikes
+        )
+        
+    async def get_short_locations(self) -> list[ShortLocation]:
+        async with self.connection.execute(
+            "SELECT id, name, likes, dislikes FROM locations"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            
+            return [
+                ShortLocation(
+                    id=id,
+                    name=name,
+                    rating=self.calc_rating(likes, dislikes)
+                )
+                for id, name, likes, dislikes in rows
+            ]
+
+    async def async_start(self) -> None:
+        await self.connection
+        await self.create_tables()
+
+        return
+
+        await self.create_location(
+            "Ліцей №38", 
+            "Знаходиться на вулиці Батальйону ім. Шейха "
+            "Мансура 17А",
+            [
+                "photo_AgACAgIAAxkBAAIBGWdV22lr9VGpRX9MHapIMjFaI9XDAAJhDDIbcyGxSmAi-gcEjuzeAQADAgADcwADNgQ"
+            ]
+        )
+        await self.create_location(
+            "Чимбар", 
+            "Знаходиться на вулиці Батальйону ім. Шейха "
+            "Мансура, 14Б",
+            [
+                "photo_AgACAgIAAxkBAAIBJGdV3K7zVcnAmAS57Akim8nABdiZAAKADDIbcyGxSo7JLobXm8ArAQADAgADcwADNgQ"
+            ]
+        )
+        await self.create_location(
+            "Дитячий садок", 
+            "Знаходиться на вулиці Батальйону ім. Шейха "
+            "Манусра, 30Г",
+            [
+                "photo_AgACAgIAAxkBAAIBJWdV3O8mpxpW2U6PkS0ZNOcH-Iy6AAKBDDIbcyGxStmHtkew8QbIAQADAgADcwADNgQ"
+            ]
+        )
+
+
+class Bot_MenuSystem(AsyncSystem):
+    def get_menu_keyboard(self) -> InlineKeyboardMarkup:
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [ 
+                    KeyboardButton(text="Локації"), 
+                    KeyboardButton(text="Детальніше") 
+                ],
+                [ 
+                    KeyboardButton(text="Запропонувати локацію") 
+                ]
+            ], 
+            resize_keyboard=True
+        )
+
+    async def on_start(self, message: Message) -> None:
         await message.answer(
             "Я - бот, створений для допомоги жителям селища Карнаухівка. "
             "Для подробиць тисніть кнопку \"Детальніше\".",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=keyboard, resize_keyboard=True
-            )
+            reply_markup=self.get_menu_keyboard()
         )
 
     async def on_details(self, message: Message) -> None:
@@ -101,9 +271,7 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         self.media_message_ids = {}
 
     def get_location_short_text(self, location: ShortLocation) -> str:
-        return "{} | {} | {}".format(
-            location.rating, location.comments, location.name
-        )
+        return "{} | {}".format(location.rating, location.name)
     
     def get_location_full_text(self, location: FullLocation) -> str:
         return (
@@ -130,7 +298,7 @@ class Bot_ViewLocationsSystem(AsyncSystem):
                     callback_data=f"comment{location.id}"
                 ),
                 InlineKeyboardButton(
-                    text=f"! ({location.comments}) Переглянути коментарі",
+                    text=f"Переглянути коментарі",
                     callback_data=f"view_comments{location.id}"
                 )
             ],
@@ -185,32 +353,39 @@ class Bot_ViewLocationsSystem(AsyncSystem):
             chat_id, message_ids + [message.message_id]
         )
 
+    async def send_media(self, chat_id: int, media: deque[str]) -> list[Message]:
+        media_data: deque[InputMedia] = deque()
+
+        for file_id in media:
+            content_type = file_id[:5]
+            file_id = file_id[6:]
+            
+            if content_type == "photo":
+                media_data.append(InputMediaPhoto(media=file_id))
+            else:
+                media_data.append(InputMediaVideo(media=file_id))
+
+        return await self.bot.send_media_group(chat_id, list(media_data))
+
     async def send_location(self, message: Message, location: FullLocation) -> None:
         if location.media:
-            media: deque[InputMedia] = deque()
-
-            for file_id in location.media:
-                content_type = file_id[:5]
-                file_id = file_id[6:]
-                
-                if content_type == "photo":
-                    media.append(InputMediaPhoto(media=file_id))
-                else:
-                    media.append(InputMediaVideo(media=file_id))
-
-            media_message_ids = await message.answer_media_group(list(media))
+            media_messages = await self.send_media(message.chat.id, location.media)
 
             if location.id not in self.media_message_ids:
                 self.media_message_ids[location.id] = {}
 
             self.media_message_ids[location.id][message.chat.id] = [
-                message.message_id for message in media_message_ids
+                message.message_id for message in media_messages
             ]
 
         await message.answer(
             text=self.get_location_full_text(location),
             reply_markup=self.get_location_inline_keyboard(location)
         )
+
+    async def send_new_location(self, location: FullLocation) -> None:
+        await self.send_media("@karnaukhivka_locations", location.media)
+        await self.bot.send_message("@karnaukhivka_locations", f"Нова локація: {location.name}")
 
     async def update_location(self, message: Message, location: FullLocation) -> None:
         await message.edit_text(
@@ -317,11 +492,15 @@ class Bot_OfferLocationSystem(AsyncSystem):
     async def set_location_media(self, message: Message, state: FSMContext) -> None:
         data = await state.get_data()
 
+        bot_menu_system = Bot_MenuSystem()
+        menu_keyboard = bot_menu_system.get_menu_keyboard()
+
         await state.clear()
         await message.answer(
             "Дякуємо за внесок у нашого з Вами боту, цим Ви "
             "робите наше селище краще! Локація у найближчий "
-            "час буде перевірена модераторами."
+            "час буде перевірена модераторами.",
+            reply_markup=menu_keyboard
         )
 
         location_name: str = data["location_name"]
@@ -341,6 +520,7 @@ class Bot_OfferLocationSystem(AsyncSystem):
 
         view_location = Bot_ViewLocationsSystem()
         await view_location.send_location(message, location)
+        await view_location.send_new_location(location)
 
     async def async_start(self) -> None:
         aiogram_system = AiogramSystem()
@@ -358,192 +538,6 @@ class Bot_OfferLocationSystem(AsyncSystem):
             self.set_location_media, 
             F.text == "Все", 
             OfferLocationForm.location_media
-        )
-
-
-class DatabaseSystem(AsyncSystem):
-    connection: Connection
-
-    def __init__(self) -> None:
-        super().__init__()
-
-        self.connection = connect("database.db", isolation_level='IMMEDIATE')
-
-    def calc_rating(self, likes: int, dislikes: int) -> float:
-        if likes + dislikes == 0:
-            return 5
-        
-        return round(5 * likes / (likes + dislikes), 1)
-            
-    async def create_tables(self) -> None:
-        await self.connection.executescript(
-            """
-                CREATE TABLE IF NOT EXISTS media (
-                    location_id INTEGER,
-                    file_id STRING
-                );
-                CREATE TABLE IF NOT EXISTS ratings (
-                    location_id INTEGER,
-                    status BOOLEAN,
-                    user_id INTEGER
-                );
-                CREATE TABLE IF NOT EXISTS comments (
-                    location_id INTEGER,
-                    text STRING,
-                    user_name STRING
-                );
-                CREATE TABLE IF NOT EXISTS locations (
-                    id INTEGER PRIMARY KEY,
-                    name STRING,
-                    info STRING,
-                    likes INTEGER,
-                    comments INTEGER,
-                    dislikes INTEGER
-                )
-            """
-        )
-
-    async def get_rating(self, user_id: int, location_id: int) -> object:
-        async with await self.connection.execute(
-            "SELECT * FROM ratings WHERE user_id=? AND location_id=?",
-            ( user_id, location_id )
-        ) as cursor:
-            return await cursor.fetchone()
-
-    async def like(self, user_id: int, location_id: int) -> Optional[FullLocation]:
-        await self.connection.execute(
-            "INSERT INTO ratings(location_id, status, user_id) "
-            "VALUES(?, TRUE, ?)",
-            ( location_id, user_id )
-        )
-        
-        if (await self.get_rating(user_id, location_id)) is None:
-            await self.connection.execute(
-                "UPDATE locations SET likes=likes + 1 WHERE id=?",
-                ( location_id, )
-            )
-        
-            return await self.get_location(location_id)
-
-    async def dislike(self, user_id: int, location_id: int) -> Optional[FullLocation]:
-        await self.connection.execute(
-            "INSERT INTO ratings(location_id, status, user_id) "
-            "VALUES(?, FALSE, ?)",
-            ( location_id, user_id )
-        )
-        
-        if (await self.get_rating(user_id, location_id)) is None:
-            await self.connection.execute(
-                "UPDATE locations SET dislikes=dislikes + 1 WHERE id=?",
-                ( location_id, )
-            )
-
-            return await self.get_location(location_id)
-
-    async def comment(self, text: str, user_name: str, location_id: int) -> None:
-        await self.connection.execute(
-            "UPDATE locations SET comments=comments + 1 WHERE id=?",
-            ( location_id, )
-        )
-        await self.connection.execute(
-            "INSERT INTO comments(location_id, text, user_name) "
-            "VALUES(?, ?, ?)",
-            ( location_id, text, user_name )
-        )
-
-    async def create_location(self, name: str, info: str, media: list[str]) -> FullLocation:
-        async with await self.connection.execute(
-            "INSERT INTO locations(id, name, info, likes, comments, dislikes) "
-            f"VALUES(NULL, ?, ?, ?, ?, ?)",
-            ( name, info, 0, 0, 0 )
-        ) as cursor:
-            location_id = cursor.lastrowid
-
-        await self.connection.execute(
-            "INSERT INTO media(location_id, file_id) "
-            f"VALUES {', '.join([f'({location_id}, ?)'] * len(media))}",
-            media
-        )
-
-        return FullLocation(
-            id=location_id,
-            name=name,
-            info=info,
-            likes=0,
-            media=media,
-            rating=5,
-            comments=0,
-            dislikes=0
-        )
-
-    async def get_location(self, location_id: int) -> FullLocation:
-        async with await self.connection.execute(
-            "SELECT file_id FROM media WHERE location_id=?",
-            ( location_id, )
-        ) as cursor:
-            rows = await cursor.fetchall()
-            media = list(map(lambda f: f[0], rows))
-
-        async with await self.connection.execute(
-            "SELECT * FROM locations WHERE id=?",
-            ( location_id, )
-        ) as cursor:
-            location_id, name, info, likes, comments, dislikes = await cursor.fetchone()
-
-        return FullLocation(
-            id=location_id,
-            name=name,
-            info=info,
-            media=media,
-            likes=likes,
-            rating=self.calc_rating(likes, dislikes),
-            comments=comments,
-            dislikes=dislikes
-        )
-        
-    async def get_short_locations(self) -> list[ShortLocation]:
-        async with self.connection.execute(
-            "SELECT id, name, likes, comments, dislikes FROM locations"
-        ) as cursor:
-            rows = await cursor.fetchall()
-            
-            return [
-                ShortLocation(
-                    id=id,
-                    name=name,
-                    rating=self.calc_rating(likes, dislikes),
-                    comments=comments
-                )
-                for id, name, likes, comments, dislikes in rows
-            ]
-
-    async def async_start(self) -> None:
-        await self.connection
-        await self.create_tables()
-
-        await self.create_location(
-            "Ліцей №38", 
-            "Знаходиться на вулиці Батальйону ім. Шейха "
-            "Мансура 17А",
-            [
-                "photo_AgACAgIAAxkBAAIBGWdV22lr9VGpRX9MHapIMjFaI9XDAAJhDDIbcyGxSmAi-gcEjuzeAQADAgADcwADNgQ"
-            ]
-        )
-        await self.create_location(
-            "Чимбар", 
-            "Знаходиться на вулиці Батальйону ім. Шейха "
-            "Мансура, 14Б",
-            [
-                "photo_AgACAgIAAxkBAAIBJGdV3K7zVcnAmAS57Akim8nABdiZAAKADDIbcyGxSo7JLobXm8ArAQADAgADcwADNgQ"
-            ]
-        )
-        await self.create_location(
-            "Дитячий садок", 
-            "Знаходиться на вулиці Батальйону ім. Шейха "
-            "Манусра, 30Г",
-            [
-                "photo_AgACAgIAAxkBAAIBJWdV3O8mpxpW2U6PkS0ZNOcH-Iy6AAKBDDIbcyGxStmHtkew8QbIAQADAgADcwADNgQ"
-            ]
         )
 
 

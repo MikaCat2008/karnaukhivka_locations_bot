@@ -37,6 +37,10 @@ class FullLocation:
     dislikes: int
 
 
+class CommentForm(StatesGroup):
+    comment_text = State()
+
+
 class OfferLocationForm(StatesGroup):
     location_name = State()
     location_info = State()
@@ -75,6 +79,10 @@ class DatabaseSystem(AsyncSystem):
                     info STRING,
                     likes INTEGER,
                     dislikes INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS forwarded_message_ids (
+                    location_id INTEGER,
+                    forwarded_message_id INTEGER
                 )
             """
         )
@@ -167,7 +175,7 @@ class DatabaseSystem(AsyncSystem):
         )
         
     async def get_short_locations(self) -> list[ShortLocation]:
-        async with self.connection.execute(
+        async with await self.connection.execute(
             "SELECT id, name, likes, dislikes FROM locations"
         ) as cursor:
             rows = await cursor.fetchall()
@@ -180,6 +188,27 @@ class DatabaseSystem(AsyncSystem):
                 )
                 for id, name, likes, dislikes in rows
             ]
+
+    async def add_forwarded_message_id(
+        self, 
+        location_id: int, 
+        forwarded_message_id: int
+    ) -> None:
+        await self.connection.execute(
+            "INSERT INTO forwarded_message_ids(location_id, forwarded_message_id)"
+            "VALUES(?, ?)",
+            ( location_id, forwarded_message_id )
+        )
+
+    async def get_forwarded_message_id(self, location_id: int) -> Optional[int]:
+        async with await self.connection.execute(
+            "SELECT * FROM forwarded_message_ids WHERE location_id=?",
+            ( location_id, )
+        ) as cursor:
+            result = await cursor.fetchone()
+            
+            if result:
+                return result[1]
 
     async def async_start(self) -> None:
         await self.connection
@@ -263,12 +292,14 @@ class Bot_MenuSystem(AsyncSystem):
 
 class Bot_ViewLocationsSystem(AsyncSystem):
     bot: TelegramBot
-    media_message_ids: dict[int, dict[int, list[int]]]
+    media_message_ids: dict[int, dict[int, int]]
+    message2location_ids: dict[int, int]
     
     def __init__(self) -> None:
         super().__init__()
 
         self.media_message_ids = {}
+        self.message2location_ids = {}
 
     def get_location_short_text(self, location: ShortLocation) -> str:
         return "{} | {}".format(location.rating, location.name)
@@ -280,7 +311,11 @@ class Bot_ViewLocationsSystem(AsyncSystem):
             "{}"
         ).format(location.name, location.rating, location.info)
     
-    def get_location_inline_keyboard(self, location: FullLocation) -> None:
+    def get_location_inline_keyboard(
+        self, 
+        location: FullLocation, 
+        message_id: Optional[int]
+    ) -> None:
         return InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
@@ -297,9 +332,17 @@ class Bot_ViewLocationsSystem(AsyncSystem):
                     text="Коментувати",
                     callback_data=f"comment{location.id}"
                 ),
-                InlineKeyboardButton(
-                    text=f"Переглянути коментарі",
-                    callback_data=f"view_comments{location.id}"
+                (
+                    InlineKeyboardButton(
+                        text=f"Переглянути коментарі",
+                        url=f"t.me/karnaukhivka_locations_chat/{message_id}"
+                    )
+                    if message_id
+                    else 
+                    InlineKeyboardButton(
+                        text="🚫 Переглянути коментарі",
+                        callback_data="view_comments"
+                    )
                 )
             ],
             [
@@ -311,9 +354,6 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         ])
 
     async def get_locations(self, message: Message) -> None:
-        start_index = 1
-        finish_index = 3
-
         database = DatabaseSystem()
         short_locations = await database.get_short_locations()
         
@@ -328,7 +368,7 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         ]
         
         await message.answer(
-            f"Локації ({start_index} - {finish_index})",
+            f"Локації (1 - {len(short_locations)})",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=inline_keyboard
             )
@@ -352,6 +392,18 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         await self.bot.delete_messages(
             chat_id, message_ids + [message.message_id]
         )
+
+    async def forwarded(self, message: Message) -> None:
+        message_id = message.forward_from_message_id
+
+        if message_id not in self.message2location_ids:
+            return await message.delete()
+        
+        location_id = self.message2location_ids[message_id]
+        del self.message2location_ids[message_id]
+        
+        database = DatabaseSystem()
+        await database.add_forwarded_message_id(location_id, message.message_id)
 
     async def send_media(self, chat_id: int, media: deque[str]) -> list[Message]:
         media_data: deque[InputMedia] = deque()
@@ -378,19 +430,30 @@ class Bot_ViewLocationsSystem(AsyncSystem):
                 message.message_id for message in media_messages
             ]
 
+        database = DatabaseSystem()
+        message_id = await database.get_forwarded_message_id(location.id)
+
         await message.answer(
             text=self.get_location_full_text(location),
-            reply_markup=self.get_location_inline_keyboard(location)
+            reply_markup=self.get_location_inline_keyboard(location, message_id)
         )
 
     async def send_new_location(self, location: FullLocation) -> None:
         await self.send_media("@karnaukhivka_locations", location.media)
-        await self.bot.send_message("@karnaukhivka_locations", f"Нова локація: {location.name}")
+        message = await self.bot.send_message(
+            "@karnaukhivka_locations", 
+            f"Нова локація: {location.name}"
+        )
+
+        self.message2location_ids[message.message_id] = location.id
 
     async def update_location(self, message: Message, location: FullLocation) -> None:
+        database = DatabaseSystem()
+        message_id = await database.get_forwarded_message_id(location.id)
+
         await message.edit_text(
             text=self.get_location_full_text(location),
-            reply_markup=self.get_location_inline_keyboard(location)
+            reply_markup=self.get_location_inline_keyboard(location, message_id)
         )
 
     async def async_start(self) -> None:
@@ -398,6 +461,7 @@ class Bot_ViewLocationsSystem(AsyncSystem):
 
         dp = aiogram_system.dispatcher
         dp.message.register(self.get_locations, F.text == "Локації")
+        dp.message.register(self.forwarded, F.from_user.id == 777000)
         dp.callback_query.register(self.on_loc, F.data.startswith("loc"))
         dp.callback_query.register(self.on_hide, F.data.startswith("hide"))
 
@@ -436,7 +500,56 @@ class Bot_RatingSystem(AsyncSystem):
 
 
 class Bot_CommentSystem(AsyncSystem):
-    ...
+    bot: TelegramBot
+
+    async def on_comment(self, callback: CallbackQuery, state: FSMContext) -> None:
+        location_id = int(callback.data[7:])
+
+        await state.set_state(CommentForm.comment_text)
+        await state.update_data(
+            location_id=location_id
+        )
+
+        keyboard = [
+            [ KeyboardButton(text="Скасувати") ]
+        ]
+
+        await callback.message.answer(
+            "Напишіть Ваше враження про локацію.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=keyboard, resize_keyboard=True
+            )
+        )
+
+    async def get_comment_text(self, message: Message, state: FSMContext) -> None:
+        bot_menu = Bot_MenuSystem()
+        menu_keyboard = bot_menu.get_menu_keyboard()
+        
+        database = DatabaseSystem()
+        message_id = await database.get_forwarded_message_id(
+            await state.get_value("location_id")
+        )
+
+        await state.clear()
+        await message.answer(
+            "Дякуємо за допомогу! Ваш " 
+            "відгук може повпливати на опис.",
+            reply_markup=menu_keyboard
+        )
+        await self.bot.send_message(
+            "@karnaukhivka_locations_chat",
+            f"Анонімний відгук: {message.text}",
+            reply_to_message_id=message_id
+        )
+
+    async def async_start(self) -> None:
+        aiogram_system = AiogramSystem()
+
+        dp = aiogram_system.dispatcher
+        dp.message.register(self.get_comment_text, CommentForm.comment_text)
+        dp.callback_query.register(self.on_comment, F.data.startswith("comment"))
+
+        self.bot = aiogram_system.bots["karnaukhivka_locations_bot"]
 
 
 class Bot_OfferLocationSystem(AsyncSystem):

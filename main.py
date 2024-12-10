@@ -18,6 +18,8 @@ from core import (
 )
 from config import TOKEN
 
+NUMBERS = [ "0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣" ]
+
 
 @dataclass
 class ShortLocation:
@@ -134,11 +136,12 @@ class DatabaseSystem(AsyncSystem):
         ) as cursor:
             location_id = cursor.lastrowid
 
-        await self.connection.execute(
-            "INSERT INTO media(location_id, file_id) "
-            f"VALUES {', '.join([f'({location_id}, ?)'] * len(media))}",
-            media
-        )
+        if media:
+            await self.connection.execute(
+                "INSERT INTO media(location_id, file_id) "
+                f"VALUES {', '.join([f'({location_id}, ?)'] * len(media))}",
+                media
+            )
 
         return FullLocation(
             id=location_id,
@@ -292,31 +295,106 @@ class Bot_MenuSystem(AsyncSystem):
 
 class Bot_ViewLocationsSystem(AsyncSystem):
     bot: TelegramBot
-    media_message_ids: dict[int, dict[int, int]]
+    pages: dict[int, dict[int, int]]
+    media_message_ids: dict[int, dict[int, list[int]]]
     message2location_ids: dict[int, int]
     
     def __init__(self) -> None:
         super().__init__()
 
+        self.pages = {}
         self.media_message_ids = {}
         self.message2location_ids = {}
 
     def get_location_short_text(self, location: ShortLocation) -> str:
         return "{} | {}".format(location.rating, location.name)
     
-    def get_location_full_text(self, location: FullLocation) -> str:
+    def get_location_full_text(self, location: FullLocation, current_page: int) -> str:
+        info = location.info[current_page * 1000:(current_page + 1) * 1000]
+
+        if len(location.info) > (current_page + 1) * 1000:
+            info += "..."
+        
         return (
             "Назва: {}\n"
             "Рейтинг: {} / 5\n\n"
             "{}"
-        ).format(location.name, location.rating, location.info)
+        ).format(location.name, location.rating, info)
     
     def get_location_inline_keyboard(
         self, 
         location: FullLocation, 
-        message_id: Optional[int]
+        message_id: Optional[int],
+        current_page: int
     ) -> None:
         return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"◀️",
+                    callback_data=f"left{location.id}"
+                ),
+                InlineKeyboardButton(
+                    text="".join(
+                        NUMBERS[int(s)]
+                        for s in str(current_page + 1)
+                    ),
+                    callback_data=" "
+                ),
+                InlineKeyboardButton(
+                    text=f"▶️",
+                    callback_data=f"right{location.id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"({location.likes}) 👍",
+                    callback_data=f"like{location.id}"
+                ),
+                InlineKeyboardButton(
+                    text=f"({location.dislikes}) 👎",
+                    callback_data=f"dislike{location.id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💬",
+                    callback_data=f"comment{location.id}"
+                ),
+                (
+                    InlineKeyboardButton(
+                        text=f"🌐",
+                        url=f"t.me/karnaukhivka_locations_chat/{message_id}"
+                    )
+                    if message_id
+                    else 
+                    InlineKeyboardButton(
+                        text="🚫",
+                        callback_data=" "
+                    )
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Приховати",
+                    callback_data=f"hide{location.id}"
+                )
+            ]
+        ])
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Вліво",
+                    callback_data=f"left{location.id}"
+                ),
+                InlineKeyboardButton(
+                    text=str(current_page + 1),
+                    callback_data=" "
+                ),
+                InlineKeyboardButton(
+                    text=f"Вправо",
+                    callback_data=f"right{location.id}"
+                )
+            ],
             [
                 InlineKeyboardButton(
                     text=f"({location.likes}) Подобається",
@@ -341,7 +419,7 @@ class Bot_ViewLocationsSystem(AsyncSystem):
                     else 
                     InlineKeyboardButton(
                         text="🚫 Переглянути коментарі",
-                        callback_data="view_comments"
+                        callback_data=" "
                     )
                 )
             ],
@@ -381,6 +459,35 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         location = await database.get_location(location_id)
 
         await self.send_location(callback.message, location)
+
+    async def on_left(self, callback: CallbackQuery) -> None:
+        message = callback.message
+        chat_id = message.chat.id
+        location_id = int(callback.data[4:])
+
+        if self.pages[location_id][chat_id] == 0:
+            return
+
+        self.pages[location_id][chat_id] -= 1
+
+        await self.update_location_id(message, location_id)
+
+    async def on_right(self, callback: CallbackQuery) -> None:
+        message = callback.message
+        chat_id = message.chat.id
+        location_id = int(callback.data[5:])
+
+        self.pages[location_id][chat_id] += 1
+
+        await self.update_location_id(message, location_id)
+
+    async def update_location_id(self, message: Message, location_id: int) -> None:
+        database = DatabaseSystem()
+        
+        await self.update_location(
+            message,
+            await database.get_location(location_id)
+        )
 
     async def on_hide(self, callback: CallbackQuery) -> None:
         message = callback.message
@@ -433,13 +540,22 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         database = DatabaseSystem()
         message_id = await database.get_forwarded_message_id(location.id)
 
+        if location.id not in self.pages:
+            self.pages[location.id] = {}
+
+        self.pages[location.id][message.chat.id] = 0
+
         await message.answer(
-            text=self.get_location_full_text(location),
-            reply_markup=self.get_location_inline_keyboard(location, message_id)
+            text=self.get_location_full_text(location, 0),
+            reply_markup=self.get_location_inline_keyboard(
+                location, message_id, 0
+            )
         )
 
     async def send_new_location(self, location: FullLocation) -> None:
-        await self.send_media("@karnaukhivka_locations", location.media)
+        if location.media:
+            await self.send_media("@karnaukhivka_locations", location.media)
+
         message = await self.bot.send_message(
             "@karnaukhivka_locations", 
             f"Нова локація: {location.name}"
@@ -451,9 +567,13 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         database = DatabaseSystem()
         message_id = await database.get_forwarded_message_id(location.id)
 
+        current_page = self.pages[location.id][message.chat.id]
+
         await message.edit_text(
-            text=self.get_location_full_text(location),
-            reply_markup=self.get_location_inline_keyboard(location, message_id)
+            text=self.get_location_full_text(location, current_page),
+            reply_markup=self.get_location_inline_keyboard(
+                location, message_id, current_page
+            )
         )
 
     async def async_start(self) -> None:
@@ -463,6 +583,8 @@ class Bot_ViewLocationsSystem(AsyncSystem):
         dp.message.register(self.get_locations, F.text == "Локації")
         dp.message.register(self.forwarded, F.from_user.id == 777000)
         dp.callback_query.register(self.on_loc, F.data.startswith("loc"))
+        dp.callback_query.register(self.on_left, F.data.startswith("left"))
+        dp.callback_query.register(self.on_right, F.data.startswith("right"))
         dp.callback_query.register(self.on_hide, F.data.startswith("hide"))
 
         self.bot = aiogram_system.bots["karnaukhivka_locations_bot"]
@@ -501,6 +623,17 @@ class Bot_RatingSystem(AsyncSystem):
 
 class Bot_CommentSystem(AsyncSystem):
     bot: TelegramBot
+
+    async def cancel(self, message: Message, state: FSMContext) -> None:
+        await state.clear()
+
+        bot_menu = Bot_MenuSystem()
+        keyboard = bot_menu.get_menu_keyboard()
+
+        await message.answer(
+            "Скасовано",
+            reply_markup=keyboard
+        )
 
     async def on_comment(self, callback: CallbackQuery, state: FSMContext) -> None:
         location_id = int(callback.data[7:])
@@ -546,6 +679,11 @@ class Bot_CommentSystem(AsyncSystem):
         aiogram_system = AiogramSystem()
 
         dp = aiogram_system.dispatcher
+        dp.message.register(
+            self.cancel, 
+            F.text == "Скасувати", 
+            CommentForm.comment_text
+        )
         dp.message.register(self.get_comment_text, CommentForm.comment_text)
         dp.callback_query.register(self.on_comment, F.data.startswith("comment"))
 
@@ -561,19 +699,35 @@ class Bot_OfferLocationSystem(AsyncSystem):
 
     async def set_location_name(self, message: Message, state: FSMContext) -> None:
         await state.update_data(
-            location_name=message.text
-        )
-        await state.set_state(OfferLocationForm.location_info)
-        await message.answer(
-            "Тепер напишіть опис локації: як туди дібратись, "
-            "чим ця локація цікава та що там можна зробити."
-        )
-
-    async def set_location_info(self, message: Message, state: FSMContext) -> None:
-        await state.update_data(
-            location_info=message.text,
+            location_name=message.text,
+            location_page_count=0,
             location_media_count=0
         )
+        await state.set_state(OfferLocationForm.location_info)
+
+        keyboard = [
+            [ KeyboardButton(text="Все") ]
+        ]
+
+        await message.answer(
+            "Тепер напишіть опис локації: як туди дібратись, "
+            "чим ця локація цікава та що там можна зробити. "
+            "Після цього нажміть на кнопку \"Все\"",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=keyboard, resize_keyboard=True
+            )
+        )
+
+    async def add_location_info(self, message: Message, state: FSMContext) -> None:
+        page_count: int = await state.get_value("location_page_count")
+        text = message.text
+
+        await state.update_data({
+            "location_page_count": page_count + 1,
+            f"location_page_{page_count}": text
+        })
+
+    async def set_location_info(self, message: Message, state: FSMContext) -> None:
         await state.set_state(OfferLocationForm.location_media)
 
         keyboard = [
@@ -617,9 +771,15 @@ class Bot_OfferLocationSystem(AsyncSystem):
         )
 
         location_name: str = data["location_name"]
-        location_info: str = data["location_info"]
+        location_info: deque[str] = deque()
         location_media: deque[str] = deque()
-        location_media_count = data["location_media_count"]
+        location_page_count: int = data["location_page_count"]
+        location_media_count: int = data["location_media_count"]
+
+        for i in range(location_page_count):
+            location_info.append(
+                data[f"location_page_{i}"]
+            )
 
         for i in range(location_media_count):
             location_media.append(
@@ -628,7 +788,7 @@ class Bot_OfferLocationSystem(AsyncSystem):
 
         database = DatabaseSystem()
         location = await database.create_location(
-            location_name, location_info, location_media
+            location_name, "\n\n".join(location_info), location_media
         )
 
         view_location = Bot_ViewLocationsSystem()
@@ -641,7 +801,12 @@ class Bot_OfferLocationSystem(AsyncSystem):
         dp = aiogram_system.dispatcher
         dp.message.register(self.offer_location, F.text == "Запропонувати локацію")
         dp.message.register(self.set_location_name, OfferLocationForm.location_name)
-        dp.message.register(self.set_location_info, OfferLocationForm.location_info)
+        dp.message.register(
+            self.set_location_info, 
+            F.text == "Все", 
+            OfferLocationForm.location_info
+        )
+        dp.message.register(self.add_location_info, OfferLocationForm.location_info)
         dp.message.register(
             self.add_location_media, 
             F.photo | F.video,

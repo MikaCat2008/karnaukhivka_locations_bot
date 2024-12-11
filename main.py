@@ -712,7 +712,7 @@ class Bot_OfferLocationSystem(AsyncSystem):
         await message.answer(
             "Тепер напишіть опис локації: як туди дібратись, "
             "чим ця локація цікава та що там можна зробити. "
-            "Після цього нажміть на кнопку \"Все\"",
+            "Коли завершите, натисніть кнопку \"Все\"",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=keyboard, resize_keyboard=True
             )

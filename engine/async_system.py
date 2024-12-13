@@ -1,4 +1,4 @@
-from core import System
+from .core import System
 
 
 class AsyncSystem(System):

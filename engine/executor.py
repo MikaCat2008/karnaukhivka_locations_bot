@@ -1,4 +1,4 @@
-from .system import System
+from .core import System
 
 
 class Executor:

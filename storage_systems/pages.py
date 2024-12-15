@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Iterable, Optional
 
 from engine.core import Entity
 from engine.async_system import AsyncSystem
@@ -16,16 +16,16 @@ class Storage_PagesSystem(AsyncSystem):
             *pages
         )
 
-    async def get_page(self, page_index: int, location_id: int) -> str:
+    async def get_page(self, page_index: int, location_id: int) -> Optional[str]:
         database = DatabaseSystem()
-
         async with await database.execute(
-            "SELECT text FROM pages WHERE rowid=? AND location_id=?",
-            page_index, location_id
+            "SELECT text FROM pages WHERE location_id=? LIMIT 1 OFFSET ?",
+            location_id, page_index
         ) as cursor:
             row = await cursor.fetchone()
             
-            return row["text"]
+            if row:
+                return row["text"]
 
     async def edit_page(
         self, 
@@ -46,8 +46,14 @@ class Storage_PagesSystem(AsyncSystem):
         location_id: int
     ) -> Entity:
         database = DatabaseSystem()
-
         await database.execute(
-            "DELETE FROM locations WHERE rowid=? AND location_id=?",
+            "DELETE FROM pages WHERE rowid=? AND location_id=?",
             page_index, location_id
+        )
+
+    async def delete_pages(self, location_id: int) -> None:
+        database = DatabaseSystem()
+        await database.execute(
+            "DELETE FROM pages WHERE location_id=?",
+            location_id
         )

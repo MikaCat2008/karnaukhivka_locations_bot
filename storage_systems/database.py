@@ -1,4 +1,4 @@
-from aiosqlite import Cursor, Connection, connect
+from aiosqlite import Row, Cursor, Connection, connect
 
 from engine.async_system import AsyncSystem
 
@@ -34,9 +34,22 @@ class DatabaseSystem(AsyncSystem):
                 CREATE TABLE IF NOT EXISTS admin_sessions (
                     user_id INTEGER
                 );
+
+                CREATE TABLE IF NOT EXISTS forwarded_messages (
+                    message_id INTEGER,
+                    location_id INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS ratings(
+                    value BOOLEAN,
+                    user_id INTEGER,
+                    location_id INTEGER
+                );
             """
         )
 
     async def async_start(self) -> None:
         await self.connection
+        self.connection.row_factory = Row
+        
         await self.create_tables()

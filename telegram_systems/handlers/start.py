@@ -1,4 +1,5 @@
 from aiogram import F
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from engine.async_system import AsyncSystem
@@ -24,8 +25,25 @@ class Bot_StartHandlersSystem(AsyncSystem):
             reply_markup=menu_markup
         )
 
+    async def on_cancel(self, message: Message, state: FSMContext) -> None:
+        await state.clear()
+
+        storage_admin = Storage_AdminSystem()
+        is_admin = await storage_admin.check_admin_session(
+            message.from_user.id
+        )
+
+        markups = Telegram_MarkupsSystem()
+        markup = markups.get_menu_markup(is_admin)
+
+        await message.answer(
+            "Скасовано.", 
+            reply_markup=markup
+        )
+
     async def async_start(self) -> None:
         aiogram_system = AiogramSystem()
 
         dp = aiogram_system.dispatcher
         dp.message.register(self.on_start, F.text == "/start")
+        dp.message.register(self.on_cancel, F.text == "Скасувати")

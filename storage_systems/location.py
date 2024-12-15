@@ -41,10 +41,13 @@ class Storage_LocationSystem(AsyncSystem):
         )
 
         if "files" in rows:
+            if row["files"]:
+                files = row["files"].split(FILES_SEPARATOR)
+            else:
+                files = []
+
             entity.add_component(
-                LocationFilesComponent(
-                    files=row["files"].split(FILES_SEPARATOR)
-                )
+                LocationFilesComponent(files=files)
             )
         if "likes" in rows:
             entity.add_component(
@@ -93,7 +96,7 @@ class Storage_LocationSystem(AsyncSystem):
         self,
         limit: int,
         offset: int,
-        verify: bool,
+        verified: bool,
         files: bool = False,
         rating: bool = False
     ) -> list[Entity]:
@@ -103,19 +106,41 @@ class Storage_LocationSystem(AsyncSystem):
         async with await database.execute(
             f"SELECT {', '.join(rows)} "
             "FROM locations "
-            f"WHERE verify={str(verify).capitalize()} "
+            f"WHERE verified={str(verified).capitalize()} "
             "LIMIT ? OFFSET ?",
             limit, offset
         ) as cursor:
             return [
-                self._create_location(row)
+                self._create_location(row, rows)
                 for row in await cursor.fetchall()
             ]
+
+    async def add_rating(self, value: bool, location_id: int) -> None:
+        database = DatabaseSystem()
+        
+        await database.execute(
+            "UPDATE locations "
+            f"SET likes=likes + {int(value)}, "
+            f"    dislikes=dislikes + {int(not value)} "
+            "WHERE id=?",
+            location_id
+        )
+
+    async def remove_rating(self, value: bool, location_id: int) -> None:
+        database = DatabaseSystem()
+        
+        await database.execute(
+            "UPDATE locations "
+            f"SET likes=likes - {int(value)}, "
+            f"    dislikes=dislikes - {int(not value)} "
+            "WHERE id=?",
+            location_id
+        )
 
     async def verify_location(self, location_id: int) -> None:
         database = DatabaseSystem()
         await database.execute(
-            "UPDATE locations SET verify=TRUE WHERE id=?",
+            "UPDATE locations SET verified=TRUE WHERE id=?",
             location_id
         )
 

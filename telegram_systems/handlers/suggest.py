@@ -29,16 +29,16 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
             location_pages_count=0,
             location_files_count=0
         )
+
+        markups = Telegram_MarkupsSystem()
+        markup = markups.get_cancel_markup()
+
         await message.answer(
-            "Спочатку напишіть коротку назву локації."
+            "Спочатку напишіть коротку назву локації. "
+            "Якщо передумали, натисніть кнопку \"Скасувати\"",
+            reply_markup=markup
         )
     
-    async def on_cancel(self, message: Message, state: FSMContext) -> None:
-        ...
-    
-    async def on_cancel_last_page(self, message: Message, state: FSMContext) -> None:
-        ...
-
     async def set_location_name(self, message: Message, state: FSMContext) -> None:
         await state.update_data(
             location_name=message.text
@@ -46,7 +46,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         await state.set_state(SuggestLocationForm.location_pages)
 
         markups = Telegram_MarkupsSystem()
-        done_markup = markups.get_done_2cancel_markup()
+        done_cancel_markup = markups.get_done_cancel_markup()
 
         await message.answer(
             "Тепер напишіть інформацію про локацію у "
@@ -54,18 +54,21 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
             "розміром до 3000 символів), які будуть "
             "сторінками. Коли ви напишете всю "
             "інформацію, то натисніть на кнопку "
-            "\"Все\". Якщо ви допустилися помилки, "
-            "то просто нажміть на кнопку \"Скасувати "
-            "попередню сторінку\", а якщо взагалі "
-            "передумали пропонувати локацію, то "
-            "натисніть на кнопку \"Скасувати\"",
-            reply_markup=done_markup
+            "\"Все\".",
+            reply_markup=done_cancel_markup
         )
 
     async def add_location_page(self, message: Message, state: FSMContext) -> None:
-        pages_count: int = await state.get_value("location_pages_count")
         text = message.text
 
+        if len(message.text) > 3000:
+            return await message.answer(
+                "Довжина сторінки більша за 3000 символів"
+                f"({len(message.text)}), тому вона не "
+                "була зарахована."
+            )
+
+        pages_count: int = await state.get_value("location_pages_count")
         await state.update_data({
             "location_pages_count": pages_count + 1,
             f"location_page_{pages_count}": text
@@ -75,14 +78,12 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         await state.set_state(SuggestLocationForm.location_files)
 
         markups = Telegram_MarkupsSystem()
-        done_markup = markups.get_done_markup()
+        done_cancel_markup = markups.get_done_cancel_markup()
 
         await message.answer(
             "Наостанок можете надіслати декілька фото чи відео. "
-            "Коли завершите, натисніть кнопку \"Все\". Якщо "
-            "на цьому етапі Ви перехотіли пропонувати локацію, "
-            "Ви також можете натиснути кнопку \"Скасувати\"",
-            reply_markup=done_markup
+            "Коли завершите, натисніть кнопку \"Все\".",
+            reply_markup=done_cancel_markup
         )
 
     async def add_location_files(self, message: Message, state: FSMContext) -> None:
@@ -101,6 +102,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
 
     async def on_done_location_files(self, message: Message, state: FSMContext) -> None:
         data = await state.get_data()
+        await state.clear()
 
         location_name: str = data["location_name"]
         location_pages: deque[str] = deque()
@@ -134,7 +136,6 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         markups = Telegram_MarkupsSystem()
         menu_markup = markups.get_menu_markup(is_admin)
 
-        await state.clear()
         await message.answer(
             "Дякуємо за внесок у нашого з Вами боту, цим Ви "
             "робите наше селище краще! Локація у найближчий "
@@ -147,11 +148,6 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
 
         dp = aiogram_system.dispatcher
         dp.message.register(self.on_suggest, F.text == "Запропонувати локацію")
-        dp.message.register(self.on_cancel, F.text == "Скасувати")
-        dp.message.register(
-            self.on_cancel_last_page, 
-            F.text == "Скасувати попередню сторінку"
-        )
         dp.message.register(
             self.set_location_name, 
             SuggestLocationForm.location_name

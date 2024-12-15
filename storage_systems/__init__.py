@@ -4,7 +4,7 @@ from .admin import Storage_AdminSystem
 from .pages import Storage_PagesSystem
 from .rating import Storage_RatingSystem
 from .location import Storage_LocationSystem
-# from .telegram import Storage_TelegramSystem as Storage_TelegramSystem
+from .telegram import Storage_TelegramSystem as Storage_TelegramSystem
 
 SYSTEMS = [
     DatabaseSystem(),
@@ -12,5 +12,6 @@ SYSTEMS = [
     Storage_AdminSystem(),
     Storage_PagesSystem(),
     Storage_RatingSystem(),
-    Storage_LocationSystem()
+    Storage_LocationSystem(),
+    Storage_TelegramSystem()
 ]

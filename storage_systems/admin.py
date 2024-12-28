@@ -2,7 +2,7 @@ from engine.async_system import AsyncSystem
 
 from .database import DatabaseSystem
 
-from config import ADMIN_NAME, ADMIN_PASSWORD
+import config
 
 
 class Storage_AdminSystem(AsyncSystem):    
@@ -31,4 +31,4 @@ class Storage_AdminSystem(AsyncSystem):
         )
 
     async def check_admin_data(self, name: str, password: str) -> bool:
-        return name == ADMIN_NAME and password == ADMIN_PASSWORD
+        return name == config.ADMIN_NAME and password == config.ADMIN_PASSWORD

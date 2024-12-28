@@ -15,6 +15,8 @@ from storage_systems import (
 )
 from telegram_systems.markups import Telegram_MarkupsSystem
 
+import consts
+
 
 class SuggestLocationForm(StatesGroup):
     location_name = State()
@@ -34,9 +36,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         markup = markups.get_cancel_markup()
 
         await message.answer(
-            "Спочатку напишіть коротку назву локації. "
-            "Якщо передумали, натисніть кнопку \"Скасувати\"",
-            reply_markup=markup
+            consts.TEXT_SUGGESTION_1, reply_markup=markup
         )
     
     async def set_location_name(self, message: Message, state: FSMContext) -> None:
@@ -49,13 +49,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         done_cancel_markup = markups.get_done_cancel_markup()
 
         await message.answer(
-            "Тепер напишіть інформацію про локацію у "
-            "такому форматі: скидуйте повідомлення("
-            "розміром до 3000 символів), які будуть "
-            "сторінками. Коли ви напишете всю "
-            "інформацію, то натисніть на кнопку "
-            "\"Все\".",
-            reply_markup=done_cancel_markup
+            consts.TEXT_SUGGESTION_2, reply_markup=done_cancel_markup
         )
 
     async def add_location_page(self, message: Message, state: FSMContext) -> None:
@@ -63,9 +57,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
 
         if len(message.text) > 3000:
             return await message.answer(
-                "Довжина сторінки більша за 3000 символів"
-                f"({len(message.text)}), тому вона не "
-                "була зарахована."
+                consts.TEXT_SUGGESTION_PAGE_LIMIT.format(len(message.text))
             )
 
         pages_count: int = await state.get_value("location_pages_count")
@@ -81,9 +73,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         done_cancel_markup = markups.get_done_cancel_markup()
 
         await message.answer(
-            "Наостанок можете надіслати декілька фото чи відео. "
-            "Коли завершите, натисніть кнопку \"Все\".",
-            reply_markup=done_cancel_markup
+            consts.TEXT_SUGGESTION_3, reply_markup=done_cancel_markup
         )
 
     async def add_location_files(self, message: Message, state: FSMContext) -> None:
@@ -137,24 +127,21 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         menu_markup = markups.get_menu_markup(is_admin)
 
         await message.answer(
-            "Дякуємо за внесок у нашого з Вами боту, цим Ви "
-            "робите наше селище краще! Локація у найближчий "
-            "час буде перевірена модераторами.",
-            reply_markup=menu_markup
+            consts.TEXT_SUGGESTION_FINISH, reply_markup=menu_markup
         )
 
     async def async_start(self) -> None:
         aiogram_system = AiogramSystem()
 
         dp = aiogram_system.dispatcher
-        dp.message.register(self.on_suggest, F.text == "Запропонувати локацію")
+        dp.message.register(self.on_suggest, F.text == consts.BUTTON_SUGGEST_LOCATION)
         dp.message.register(
             self.set_location_name, 
             SuggestLocationForm.location_name
         )
         dp.message.register(
             self.on_done_location_pages, 
-            F.text == "Все", 
+            F.text == consts.BUTTON_DONE, 
             SuggestLocationForm.location_pages
         )
         dp.message.register(
@@ -163,7 +150,7 @@ class Bot_SuggestHandlersSystem(AsyncSystem):
         )
         dp.message.register(
             self.on_done_location_files, 
-            F.text == "Все", 
+            F.text == consts.BUTTON_DONE, 
             SuggestLocationForm.location_files
         )
         dp.message.register(

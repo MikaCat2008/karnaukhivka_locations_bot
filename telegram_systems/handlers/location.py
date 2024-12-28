@@ -28,7 +28,7 @@ from storage_systems import (
 from telegram_systems.filters import admin_filter
 from telegram_systems.markups import Telegram_MarkupsSystem
 
-from config import KARNAUKHIVKA_LOCATIONS, KARNAUKHIVKA_LOCATIONS_CHAT
+import consts, config
 
 
 class CommentForm(StatesGroup):
@@ -86,10 +86,8 @@ class Bot_LocationHandlersSystem(AsyncSystem):
             page_index, identity_component.id
         )
 
-        return (
-            f"Назва: {identity_component.name}\n"
-            f"Рейтинг: {rating} / 5\n\n" + 
-            page_text
+        return consts.TEXT_LOCATION.format(
+            identity_component.name, rating, page_text
         )
 
     async def _get_unverified_location_text(self, location: Entity, page_index: int) -> str:
@@ -99,10 +97,8 @@ class Bot_LocationHandlersSystem(AsyncSystem):
             page_index, identity_component.id
         )
 
-        return (
-            "Запропонована локація:\n"
-            f"Назва: {identity_component.name}\n\n" +
-            page_text  
+        return consts.TEXT_UNVERIFIED_LOCATION.format(
+            identity_component.name, page_text
         )
 
     async def _get_locations(
@@ -145,9 +141,13 @@ class Bot_LocationHandlersSystem(AsyncSystem):
             locations_data.append((identity_component.id, text))
 
         if verified:
-            text = f"Локації ({index * 10 + 1} - {index * 10 + len(locations)})"
+            text = consts.TEXT_LOCATIONS
         else:
-            text = f"Запропоновані локації ({index * 10 + 1} - {index * 10 + len(locations)})"
+            text = consts.TEXT_UNVERIFIED_LOCATIONS
+
+        text = text.format(
+            index * 10 + 1, index * 10 + len(locations)
+        )
 
         markups = Telegram_MarkupsSystem()
         markup = markups.get_locations_markup(
@@ -394,8 +394,7 @@ class Bot_LocationHandlersSystem(AsyncSystem):
         markup = markups.get_cancel_markup()
 
         await message.answer(
-            "Напишіть Ваше враження про локацію.",
-            reply_markup=markup
+            consts.TEXT_WRITE_COMMENT, reply_markup=markup
         )
 
     async def get_comment_text(self, message: Message, state: FSMContext) -> None:
@@ -408,9 +407,7 @@ class Bot_LocationHandlersSystem(AsyncSystem):
         markup = markups.get_menu_markup(is_admin)
 
         await message.answer(
-            "Дякуємо за допомогу! Ваш відгук може повпливати "
-            "на опис.",
-            reply_markup=markup
+            consts.TEXT_WRITE_COMMENT_FINISH, reply_markup=markup
         )
 
         storage_telegram = Storage_TelegramSystem()
@@ -420,8 +417,8 @@ class Bot_LocationHandlersSystem(AsyncSystem):
 
         await state.clear()
         await self.bot.send_message(
-            KARNAUKHIVKA_LOCATIONS_CHAT,
-            f"Анонімний відгук: {message.text}",
+            config.KARNAUKHIVKA_LOCATIONS_CHAT,
+            consts.TEXT_COMMENT.format(message.text),
             reply_to_message_id=message_id
         )
 
@@ -466,8 +463,7 @@ class Bot_LocationHandlersSystem(AsyncSystem):
         markup = markups.get_menu_markup(True)
 
         await message.answer(
-            "Локація опублікована. Дякуємо за співпрацю!",
-            reply_markup=markup
+            consts.TEXT_LOCATION_PUBLISHIED, reply_markup=markup
         )
 
         storage_location = Storage_LocationSystem()
@@ -479,14 +475,14 @@ class Bot_LocationHandlersSystem(AsyncSystem):
         files = files_component.files
 
         if files:
-            await self.send_files(files, KARNAUKHIVKA_LOCATIONS)
+            await self.send_files(files, config.KARNAUKHIVKA_LOCATIONS)
 
         identity_component = location.get_component(LocationComponent)
         name = identity_component.name
 
         message = await self.bot.send_message(
-            KARNAUKHIVKA_LOCATIONS, 
-            f"Нова локація: {name}"
+            config.KARNAUKHIVKA_LOCATIONS, 
+            consts.TEXT_NEW_LOCATION.format(name)
         )
 
         await storage_telegram.locations_forwarded_ids.set_value(
@@ -548,10 +544,10 @@ class Bot_LocationHandlersSystem(AsyncSystem):
 
         dp = aiogram_system.dispatcher
 
-        dp.message.register(self.on_locations, F.text == "Локації")
+        dp.message.register(self.on_locations, F.text == consts.BUTTON_LOCATIONS)
         dp.message.register(
             self.on_check_locations, 
-            F.text == "Перевірити локації",
+            F.text == consts.BUTTON_REVIEW_LOCATIONS,
             admin_filter
         )
 
@@ -618,4 +614,4 @@ class Bot_LocationHandlersSystem(AsyncSystem):
 
         dp.message.register(self.on_forward, F.from_user.id == 777000)
 
-        self.bot = aiogram_system.bots["karnaukhivka_locations_bot"]
+        self.bot = aiogram_system.bots[config.KARNAUKHIVKA_LOCATIONS_BOT]

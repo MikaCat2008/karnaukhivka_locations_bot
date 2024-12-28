@@ -9,6 +9,8 @@ from engine.aiogram_system import AiogramSystem
 from storage_systems import Storage_AdminSystem
 from telegram_systems.markups import Telegram_MarkupsSystem
 
+import consts
+
 
 class AdminLoginForm(StatesGroup):
     admin_name = State()
@@ -25,9 +27,9 @@ class Bot_AdminHandlersSystem(AsyncSystem):
         if is_admin:
             await storage_admin.remove_admin_session(message.from_user.id)
 
-            text = "Ви вийшли з системи."
+            text = consts.TEXT_LOGOUT_ADMIN
         else:
-            text = "Ви не авторизовані в системі."
+            text = consts.TEXT_NOT_AUTHORIZED
 
         markups = Telegram_MarkupsSystem()
         menu_markup = markups.get_menu_markup(is_admin)
@@ -42,22 +44,18 @@ class Bot_AdminHandlersSystem(AsyncSystem):
 
         if is_admin:
             await message.answer(
-                "Ви вже авторизовані в системі."
+                consts.TEXT_ALREADY_AUTHORIZED
             )
         else:
             await state.set_state(AdminLoginForm.admin_name)
-            await message.answer(
-                "Напишіть ім'я в системі"
-            )
+            await message.answer(consts.TEXT_ADMIN_AUTHORIZE_1)
     
     async def set_admin_name(self, message: Message, state: FSMContext) -> None:
         await state.set_state(AdminLoginForm.admin_password)
         await state.update_data(
             admin_name=message.text
         )
-        await message.answer(
-            "Напишіть пароль"
-        )
+        await message.answer(consts.TEXT_ADMIN_AUTHORIZE_2)
 
     async def set_admin_password(self, message: Message, state: FSMContext) -> None:
         data = await state.get_data()
@@ -72,11 +70,11 @@ class Bot_AdminHandlersSystem(AsyncSystem):
         )
 
         if status:
-            text = "Ви авторизовані в системі."
+            text = consts.TEXT_ADMIN_AUTHORIZED
         
             await storage_admin.add_admin_session(message.from_user.id)
         else:
-            text = "Неправильне ім'я або пароль."
+            text = consts.TEXT_INCORRECT_ADMIN_DATA
 
         markups = Telegram_MarkupsSystem()
         menu_markup = markups.get_menu_markup(status)

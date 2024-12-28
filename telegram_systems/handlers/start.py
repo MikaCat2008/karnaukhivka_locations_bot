@@ -8,6 +8,8 @@ from engine.aiogram_system import AiogramSystem
 from storage_systems import Storage_AdminSystem
 from telegram_systems.markups import Telegram_MarkupsSystem
 
+import consts
+
 
 class Bot_StartHandlersSystem(AsyncSystem):
     async def on_start(self, message: Message) -> None:
@@ -20,9 +22,7 @@ class Bot_StartHandlersSystem(AsyncSystem):
         menu_markup = markups.get_menu_markup(is_admin)
 
         await message.answer(
-            "Я - бот, створений для допомоги жителям селища Карнаухівка. "
-            "Для подробиць тисніть кнопку \"Детальніше\".",
-            reply_markup=menu_markup
+            consts.TEXT_WELCOME, reply_markup=menu_markup
         )
 
     async def on_cancel(self, message: Message, state: FSMContext) -> None:
@@ -37,8 +37,7 @@ class Bot_StartHandlersSystem(AsyncSystem):
         markup = markups.get_menu_markup(is_admin)
 
         await message.answer(
-            "Скасовано.", 
-            reply_markup=markup
+            consts.TEXT_CANCELLED, reply_markup=markup
         )
 
     async def async_start(self) -> None:
@@ -46,4 +45,4 @@ class Bot_StartHandlersSystem(AsyncSystem):
 
         dp = aiogram_system.dispatcher
         dp.message.register(self.on_start, F.text == "/start")
-        dp.message.register(self.on_cancel, F.text == "Скасувати")
+        dp.message.register(self.on_cancel, F.text == consts.BUTTON_CANCEL)

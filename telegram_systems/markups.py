@@ -8,24 +8,24 @@ from aiogram.types import (
 
 from engine.core import System
 
-NUMBERS = [ "0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣" ]
+import consts, config
 
 
 class Telegram_MarkupsSystem(System):
     def get_menu_markup(self, is_admin: bool) -> ReplyKeyboardMarkup:
         keyboard = [
             [ 
-                KeyboardButton(text="Локації"), 
-                KeyboardButton(text="Детальніше") 
+                KeyboardButton(text=consts.BUTTON_LOCATIONS), 
+                KeyboardButton(text=consts.BUTTON_DETAILS) 
             ],
             [ 
-                KeyboardButton(text="Запропонувати локацію") 
+                KeyboardButton(text=consts.BUTTON_SUGGEST_LOCATION) 
             ]
         ]
         
         if is_admin:
             keyboard.append([ 
-                KeyboardButton(text="Перевірити локації") 
+                KeyboardButton(text=consts.BUTTON_REVIEW_LOCATIONS) 
             ])
 
         return ReplyKeyboardMarkup(
@@ -35,7 +35,7 @@ class Telegram_MarkupsSystem(System):
     def get_done_markup(self) -> ReplyKeyboardMarkup:
         return ReplyKeyboardMarkup(
             keyboard=[
-                [ KeyboardButton(text="Все") ]
+                [ KeyboardButton(text=consts.BUTTON_DONE) ]
             ],
             resize_keyboard=True
         )
@@ -43,7 +43,7 @@ class Telegram_MarkupsSystem(System):
     def get_cancel_markup(self) -> ReplyKeyboardMarkup:
         return ReplyKeyboardMarkup(
             keyboard=[
-                [ KeyboardButton(text="Скасувати") ]
+                [ KeyboardButton(text=consts.BUTTON_CANCEL) ]
             ],
             resize_keyboard=True
         )
@@ -52,8 +52,8 @@ class Telegram_MarkupsSystem(System):
         return ReplyKeyboardMarkup(
             keyboard=[
                 [ 
-                    KeyboardButton(text="Все"),
-                    KeyboardButton(text="Скасувати")
+                    KeyboardButton(text=consts.BUTTON_DONE),
+                    KeyboardButton(text=consts.BUTTON_CANCEL)
                 ]
             ],
             resize_keyboard=True
@@ -113,8 +113,8 @@ class Telegram_MarkupsSystem(System):
     ) -> InlineKeyboardMarkup:
         if message_id:
             comments = InlineKeyboardButton(
-                text=f"Коментарі 🌐",
-                url=f"t.me/karnaukhivka_locations_chat/{message_id}"
+                text=f"{consts.BUTTON_COMMENTS} 🌐",
+                url=f"t.me/{config.KARNAUKHIVKA_LOCATIONS_CHAT[1:]}/{message_id}"
             )
         else: 
             comments = InlineKeyboardButton(
@@ -130,7 +130,7 @@ class Telegram_MarkupsSystem(System):
                 ),
                 InlineKeyboardButton(
                     text="".join(
-                        NUMBERS[int(s)]
+                        consts.PAGE_NUMBERS[int(s)]
                         for s in str(index)
                     ),
                     callback_data=" "
@@ -159,7 +159,7 @@ class Telegram_MarkupsSystem(System):
             ],
             [
                 InlineKeyboardButton(
-                    text="Приховати",
+                    text=consts.BUTTON_HIDE,
                     callback_data="hide_location"
                 )
             ]
@@ -175,7 +175,7 @@ class Telegram_MarkupsSystem(System):
                     ),
                     InlineKeyboardButton(
                         text="".join(
-                            NUMBERS[int(s)]
+                            consts.PAGE_NUMBERS[int(s)]
                             for s in str(index)
                         ),
                         callback_data=" "

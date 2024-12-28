@@ -28,6 +28,8 @@ from storage_systems import (
 from telegram_systems.filters import admin_filter
 from telegram_systems.markups import Telegram_MarkupsSystem
 
+from config import KARNAUKHIVKA_LOCATIONS, KARNAUKHIVKA_LOCATIONS_CHAT
+
 
 class CommentForm(StatesGroup):
     comment_text = State()
@@ -418,7 +420,7 @@ class Bot_LocationHandlersSystem(AsyncSystem):
 
         await state.clear()
         await self.bot.send_message(
-            "@karnaukhivka_locations_chat",
+            KARNAUKHIVKA_LOCATIONS_CHAT,
             f"Анонімний відгук: {message.text}",
             reply_to_message_id=message_id
         )
@@ -477,13 +479,13 @@ class Bot_LocationHandlersSystem(AsyncSystem):
         files = files_component.files
 
         if files:
-            await self.send_files(files, "@karnaukhivka_locations")
+            await self.send_files(files, KARNAUKHIVKA_LOCATIONS)
 
         identity_component = location.get_component(LocationComponent)
         name = identity_component.name
 
         message = await self.bot.send_message(
-            "@karnaukhivka_locations", 
+            KARNAUKHIVKA_LOCATIONS, 
             f"Нова локація: {name}"
         )
 

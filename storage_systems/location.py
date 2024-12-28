@@ -69,9 +69,7 @@ class Storage_LocationSystem(AsyncSystem):
             "INSERT INTO "
             "locations(id, name, files, likes, dislikes, verified) "
             f"VALUES(NULL, ?, ?, ?, ?, FALSE)",
-            name, 
-            FILES_SEPARATOR.join(files), 
-            0, 0
+            name, FILES_SEPARATOR.join(files), 0, 0
         ) as cursor:
             return cursor.lastrowid
 

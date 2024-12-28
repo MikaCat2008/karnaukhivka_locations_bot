@@ -2,6 +2,8 @@ from aiosqlite import Row, Cursor, Connection, connect
 
 from engine.async_system import AsyncSystem
 
+import config
+
 
 class DatabaseSystem(AsyncSystem):
     connection: Connection
@@ -9,7 +11,7 @@ class DatabaseSystem(AsyncSystem):
     def __init__(self) -> None:
         super().__init__()
 
-        self.connection = connect("database.db", isolation_level=None)
+        self.connection = connect(config.DATABASE_PATH, isolation_level=None)
 
     async def execute(self, sql: str, *args) -> Cursor:
         return await self.connection.execute(sql, args)
